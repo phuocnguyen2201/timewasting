@@ -7,7 +7,7 @@ for the full product spec.
 
 - Vite + React + Tailwind CSS
 - Supabase (Postgres + Realtime) for rooms, players, and live leaderboards
-- Netlify for hosting
+- GitHub Pages for hosting (deployed via GitHub Actions)
 
 ## Getting started
 
@@ -46,10 +46,42 @@ npm run dev
 
 ## Deploying
 
-Connect the repo to Netlify — `netlify.toml` already sets the build command
-(`npm run build`) and publish directory (`dist`), plus the SPA redirect rule
-for client-side routing. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-as environment variables in the Netlify site settings.
+### GitHub Pages (current)
+
+[.github/workflows/deploy.yml](./.github/workflows/deploy.yml) builds and
+deploys on every push to `main`. One-time setup:
+
+1. **Repo secrets** — Settings → Secrets and variables → Actions → New
+   repository secret, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+   (same values as your local `.env`).
+2. **Enable Pages** — Settings → Pages → Build and deployment → Source:
+   **GitHub Actions**.
+3. Push to `main` (or run the workflow manually from the Actions tab). The
+   site ends up at `https://<user>.github.io/<repo>/`.
+
+Two things this workflow handles that a plain `npm run build` wouldn't:
+
+- **Base path** — a GitHub Pages *project* site (not `<user>.github.io`
+  itself) is served under `/<repo>/`, not `/`, so the build passes
+  `--base=/<repo>/` (`github.event.repository.name`, resolved at build
+  time) to get every asset URL right. Don't run a plain `npm run build`
+  and upload `dist/` by hand — it'll 404 on all the assets.
+- **Client-side routing fallback** — GitHub Pages is static hosting with
+  no server-side rewrites, unlike Netlify's `netlify.toml` redirect rule.
+  A direct link or refresh on a route like `/room/ABCD` would 404. The
+  workflow copies `dist/index.html` to `dist/404.html` so GitHub Pages
+  serves the app on any unmatched path, letting React Router take it from
+  there.
+
+### Netlify (alternative)
+
+`netlify.toml` is still in the repo and works if you'd rather use Netlify
+— connect the repo at [app.netlify.com](https://app.netlify.com), it
+auto-detects the build command (`npm run build`) and publish directory
+(`dist`) plus the SPA redirect rule already in that file. Add
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as environment variables
+in the Netlify site settings. No base-path flag needed here since Netlify
+serves the site at the root of its own domain.
 
 ## Project structure
 
