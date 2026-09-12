@@ -179,6 +179,9 @@ export default function GameRoom() {
             {copied ? 'Copied!' : 'Copy'}
           </button>
         </div>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {players.length} {players.length === 1 ? 'player' : 'players'} in room
+        </p>
       </div>
 
       <div className="flex flex-1 flex-col">

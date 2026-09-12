@@ -4,7 +4,7 @@ export default function Leaderboard({ players }) {
   return (
     <div className="border-t border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        Leaderboard
+        Leaderboard ({players.length})
       </h2>
       <ol className="space-y-1">
         {ranked.map((player, index) => (

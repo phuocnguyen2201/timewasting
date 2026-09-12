@@ -10,6 +10,33 @@ import {
   preloadDictionary,
 } from './words'
 
+// Standard competition ranking (1224): tied scores share a place, and the
+// next distinct score picks up at the rank it would've had without the tie.
+function rankOf(players, playerId) {
+  const sorted = [...players].sort((a, b) => b.score - a.score)
+  let rank = 1
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i].score < sorted[i - 1].score) rank = i + 1
+    if (sorted[i].id === playerId) return rank
+  }
+  return sorted.length
+}
+
+function ordinal(n) {
+  const v = n % 100
+  if (v >= 11 && v <= 13) return `${n}th`
+  switch (n % 10) {
+    case 1:
+      return `${n}st`
+    case 2:
+      return `${n}nd`
+    case 3:
+      return `${n}rd`
+    default:
+      return `${n}th`
+  }
+}
+
 export default function GuessTheWord({ room, myPlayerId, isHost, players }) {
   const [round, setRound] = useState(null)
   const [selectedDuration, setSelectedDuration] = useState(null)
@@ -400,6 +427,14 @@ function RoundView({ round, room, myPlayerId, players, onSessionEnd }) {
           <p className="text-lg font-semibold text-gray-700 dark:text-gray-200">
             You found {myClaims.length} word{myClaims.length === 1 ? '' : 's'} this round.
           </p>
+          {isLastWord && (
+            <div className="text-center">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Game over</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                You are {ordinal(rankOf(players, myPlayerId))} place
+              </p>
+            </div>
+          )}
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {isLastWord ? 'Final results' : 'Next word'} in {revealCountdown}s...
           </p>

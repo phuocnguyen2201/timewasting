@@ -11,6 +11,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/timewasting" element={<Landing />} />
           <Route path="/games" element={<GameList />} />
           <Route path="/games/:gameId" element={<GameDetail />} />
           <Route path="/room/:code" element={<GameRoom />} />
