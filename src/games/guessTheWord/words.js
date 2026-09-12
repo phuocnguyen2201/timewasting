@@ -33,35 +33,10 @@ export function patternFromWord(word) {
   }
 }
 
-// A guess only had to match the round's first/last letter before, so
-// "BSDFKDSFKT" scored against a "B...T" pattern — nothing ever checked it
-// was an actual word. Real validation needs a real dictionary: this uses
-// an-array-of-english-words (~275k words, https://www.npmjs.com/package/an-array-of-english-words),
-// loaded via a dynamic import so Vite code-splits it into its own chunk —
-// it's ~3MB of JSON, and this way it's never in the initial page bundle,
-// only fetched once something actually needs it.
-let dictionaryPromise = null
-
-function loadDictionary() {
-  if (!dictionaryPromise) {
-    dictionaryPromise = import('an-array-of-english-words').then(
-      (mod) => new Set(mod.default.map((word) => word.toUpperCase()))
-    )
-  }
-  return dictionaryPromise
-}
-
-// Kicks off the dictionary fetch without waiting on it — call this as soon
-// as the game screen mounts so it's already loaded by the time anyone
-// submits a guess.
-export function preloadDictionary() {
-  loadDictionary()
-}
-
-export async function isValidWord(word) {
-  const dictionary = await loadDictionary()
-  return dictionary.has(word.toUpperCase())
-}
+// Real dictionary validation lives in lib/dictionary.js, shared with any
+// other game that needs to check a guess is a real word — re-exported here
+// so existing imports of these two names keep working unchanged.
+export { isValidWord, preloadDictionary } from '../../lib/dictionary'
 
 export function matchesPattern(word, { start_char, end_char }) {
   const w = word.toUpperCase().trim()

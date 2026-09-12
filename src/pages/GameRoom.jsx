@@ -3,10 +3,12 @@ import { Link, Navigate, useLocation, useParams } from 'react-router-dom'
 import Leaderboard from '../components/Leaderboard'
 import { usePlayer } from '../context/PlayerContext'
 import GuessTheWord from '../games/guessTheWord/GuessTheWord'
+import WhatIsTheObject from '../games/whatIsTheObject/WhatIsTheObject'
 import { supabase } from '../lib/supabase'
 
 const GAMES = {
   'guess-the-word': GuessTheWord,
+  'what-is-the-object': WhatIsTheObject,
 }
 
 export default function GameRoom() {
