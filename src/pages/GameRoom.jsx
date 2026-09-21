@@ -4,11 +4,13 @@ import Leaderboard from '../components/Leaderboard'
 import { usePlayer } from '../context/PlayerContext'
 import GuessTheWord from '../games/guessTheWord/GuessTheWord'
 import WhatIsTheObject from '../games/whatIsTheObject/WhatIsTheObject'
+import WordSearch from '../games/wordSearch/WordSearch'
 import { supabase } from '../lib/supabase'
 
 const GAMES = {
   'guess-the-word': GuessTheWord,
   'what-is-the-object': WhatIsTheObject,
+  'word-search': WordSearch,
 }
 
 export default function GameRoom() {

@@ -25,3 +25,9 @@ export async function isValidWord(word) {
   const dictionary = await loadDictionary()
   return dictionary.has(word.toUpperCase())
 }
+
+// For callers that want to run many lookups (e.g. scanning a whole grid for
+// every real word it happens to contain) without an await per word.
+export async function getDictionary() {
+  return loadDictionary()
+}
