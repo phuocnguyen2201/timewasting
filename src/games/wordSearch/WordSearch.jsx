@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { preloadDictionary } from '../../lib/dictionary'
 import { supabase } from '../../lib/supabase'
 import {
@@ -24,9 +24,51 @@ const PLAYER_COLORS = [
   'bg-orange-300 dark:bg-orange-800',
 ]
 
+// Index-matched to PLAYER_COLORS, as real color values — the SVG grid
+// overlay (see RoundView) can't take a Tailwind class: `fill`/`stroke`
+// need an actual value, and building a class name like `fill-indigo-300`
+// at runtime doesn't work either, since Tailwind only generates CSS for
+// class names it can find as literal text in the source, not ones
+// assembled in JS. These are plain hex so the overlay never depends on
+// Tailwind's build-time scan.
+const PLAYER_FILL_COLORS = [
+  '#c7d2fe', // indigo-200
+  '#a7f3d0', // emerald-200
+  '#fde68a', // amber-200
+  '#fecdd3', // rose-200
+  '#bae6fd', // sky-200
+  '#ddd6fe', // violet-200
+  '#99f6e4', // teal-200
+  '#fed7aa', // orange-200
+]
+
+// Same idea, saturated/opaque rather than pastel — used for the
+// connecting line drawn on top of the fill above, so the line still reads
+// against it.
+const PLAYER_STROKE_COLORS = [
+  '#4f46e5', // indigo-600
+  '#059669', // emerald-600
+  '#d97706', // amber-600
+  '#e11d48', // rose-600
+  '#0284c7', // sky-600
+  '#7c3aed', // violet-600
+  '#0d9488', // teal-600
+  '#ea580c', // orange-600
+]
+
 function colorForPlayer(playerId, players) {
   const idx = players.findIndex((p) => p.id === playerId)
   return PLAYER_COLORS[Math.max(idx, 0) % PLAYER_COLORS.length]
+}
+
+function fillForPlayer(playerId, players) {
+  const idx = players.findIndex((p) => p.id === playerId)
+  return PLAYER_FILL_COLORS[Math.max(idx, 0) % PLAYER_FILL_COLORS.length]
+}
+
+function strokeForPlayer(playerId, players) {
+  const idx = players.findIndex((p) => p.id === playerId)
+  return PLAYER_STROKE_COLORS[Math.max(idx, 0) % PLAYER_STROKE_COLORS.length]
 }
 
 export default function WordSearch({ room, myPlayerId, isHost, players }) {
@@ -178,6 +220,49 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
   const claimsRef = useRef(claims)
   claimsRef.current = claims
 
+  // Pixel boxes of every grid cell, relative to the grid wrapper — used to
+  // draw the claimed-word fill + connecting line *behind* the letters (see
+  // the SVG overlay below: it sits under the grid via z-index, and claimed
+  // cells drop their own background so that fill shows through, while the
+  // letter — still part of the cell button, on top of its own transparent
+  // background — stays fully readable on top of it). Measured from the
+  // real DOM instead of computed from row/col math so it stays exact
+  // regardless of the grid's gap/cell-size at any breakpoint.
+  const gridWrapperRef = useRef(null)
+  const cellElRefs = useRef(new Map())
+  const [cellRects, setCellRects] = useState({})
+
+  function setCellRef(key) {
+    return (el) => {
+      if (el) cellElRefs.current.set(key, el)
+      else cellElRefs.current.delete(key)
+    }
+  }
+
+  useLayoutEffect(() => {
+    function measure() {
+      const wrapper = gridWrapperRef.current
+      if (!wrapper) return
+      const wrapperRect = wrapper.getBoundingClientRect()
+      const next = {}
+      for (const [key, el] of cellElRefs.current) {
+        const rect = el.getBoundingClientRect()
+        next[key] = {
+          x: rect.left - wrapperRect.left,
+          y: rect.top - wrapperRect.top,
+          width: rect.width,
+          height: rect.height,
+        }
+      }
+      setCellRects(next)
+    }
+
+    measure()
+    const observer = new ResizeObserver(measure)
+    if (gridWrapperRef.current) observer.observe(gridWrapperRef.current)
+    return () => observer.disconnect()
+  }, [round.rows, round.cols])
+
   function playerName(playerId) {
     return players.find((p) => p.id === playerId)?.name ?? '...'
   }
@@ -311,39 +396,69 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
     }
   }
 
+  // A pause of SUBMIT_DEBOUNCE_MS after the last press auto-submits
+  // whatever's been built up so far, then clears the selection either way
+  // so the next word starts fresh. Every press explicitly clears and
+  // restarts this timer — some players don't tap letters fast, so the
+  // clock has to measure the gap since the *last* press, not a fixed
+  // window from the first one.
+  const submitTimerRef = useRef(null)
+
+  function clearSubmitTimer() {
+    if (submitTimerRef.current) {
+      clearTimeout(submitTimerRef.current)
+      submitTimerRef.current = null
+    }
+  }
+
   function handleCellPress(row, col) {
     if (allFound || submitting) return
     setError(null)
-    setSelectedCells((prev) => [...prev, { row, col }])
+    clearSubmitTimer()
+
+    // Scheduling the timer here (a plain event handler) rather than inside
+    // the setSelectedCells updater matters: React's StrictMode
+    // double-invokes updater functions in dev to catch impure ones, which
+    // was silently scheduling two timers per press — one got orphaned in
+    // the ref (never cleared) and could fire early on a stale, incomplete
+    // word. An updater has no business scheduling anything.
+    const next = [...selectedCells, { row, col }]
+    setSelectedCells(next)
+    submitTimerRef.current = setTimeout(() => {
+      const word = next.map(({ row: r, col: c }) => round.grid[r][c]).join('')
+      submitGuess(word)
+      setSelectedCells([])
+    }, SUBMIT_DEBOUNCE_MS)
   }
 
   function handleClearSelection() {
+    clearSubmitTimer()
     setSelectedCells([])
     setError(null)
   }
 
-  // A pause of SUBMIT_DEBOUNCE_MS after the last press auto-submits
-  // whatever's been built up so far, then clears the selection either way
-  // so the next word starts fresh.
-  useEffect(() => {
-    if (selectedCells.length === 0) return
-    const timeout = setTimeout(() => {
-      submitGuess(pendingWord)
-      setSelectedCells([])
-    }, SUBMIT_DEBOUNCE_MS)
-    return () => clearTimeout(timeout)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCells])
+  // Cancel any pending auto-submit if the round view unmounts mid-timer
+  // (round advances, session ends, ...).
+  useEffect(() => clearSubmitTimer, [])
 
-  // Cell -> player color for every claimed word's letters.
+  // Cell -> fill color (hex, for the SVG rect — see below) for every
+  // claimed word's letters, plus the same claimed placements paired with a
+  // stroke color, used to draw a connecting line through each one — the
+  // line is what makes an overlapping word's own path readable at a
+  // glance, instead of just a wash of same-colored cells.
   const cellColor = {}
+  const claimedLines = []
   for (const placement of round.placements) {
     const claim = claims.find((c) => c.word === placement.word)
     if (!claim) continue
-    const color = colorForPlayer(claim.player_id, players)
+    const fill = fillForPlayer(claim.player_id, players)
     for (const { row, col } of cellsForPlacement(placement)) {
-      cellColor[`${row}-${col}`] = color
+      cellColor[`${row}-${col}`] = fill
     }
+    claimedLines.push({
+      placement,
+      stroke: strokeForPlayer(claim.player_id, players),
+    })
   }
 
   const selectedSet = new Set(selectedCells.map(({ row, col }) => `${row}-${col}`))
@@ -373,10 +488,12 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
     <div className="flex flex-1 flex-col items-center gap-5 p-6">
       <div className="text-center">
         <p className="text-xs uppercase tracking-wide text-gray-400">
-          Round {round.round_index}/{round.total_rounds} · {round.theme} ·{' '}
-          {DIFFICULTIES[round.difficulty]?.label}
+          Round {round.round_index}/{round.total_rounds}
         </p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+          Topic: {round.theme}
+        </p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           {claims.length}/{round.words.length} found · You found{' '}
           {myClaims.length}
         </p>
@@ -387,33 +504,85 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
         )}
       </div>
 
-      <div
-        className="grid gap-1.5"
-        style={{ gridTemplateColumns: `repeat(${round.cols}, minmax(0, 1fr))` }}
-      >
-        {round.grid.map((rowLetters, r) =>
-          rowLetters.map((letter, c) => {
-            const cellKey = `${r}-${c}`
-            const isSelected = selectedSet.has(cellKey)
-            const isHint = !isSelected && hintCellKey === cellKey
+      {/* Extra top space so the grid sits lower on tall phone screens,
+          closer to where a thumb naturally reaches. */}
+      <div ref={gridWrapperRef} className="relative mt-4 sm:mt-10">
+        {/* Claimed-word fill + connecting line, drawn *behind* the grid
+            (z-0 vs the grid's z-10 below) — a claimed cell drops its own
+            background so this shows through it, while the letter itself
+            stays part of the (now-transparent) button and so always
+            paints on top of it, fully readable, instead of the line
+            crossing over the glyph. */}
+        <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible">
+          {Object.entries(cellColor).map(([key, fill]) => {
+            const rect = cellRects[key]
+            if (!rect) return null
             return (
-              <button
-                key={cellKey}
-                type="button"
-                onClick={() => handleCellPress(r, c)}
-                disabled={allFound || submitting}
-                className={`flex aspect-square w-11 select-none items-center justify-center rounded-lg font-mono text-lg font-bold transition active:scale-90 disabled:cursor-not-allowed sm:w-14 sm:text-2xl ${
-                  cellColor[cellKey] ??
-                  'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
-                } ${isSelected ? 'ring-4 ring-indigo-500' : ''} ${
-                  isHint ? 'animate-pulse ring-4 ring-amber-400' : ''
-                }`}
-              >
-                {letter}
-              </button>
+              <rect
+                key={key}
+                x={rect.x}
+                y={rect.y}
+                width={rect.width}
+                height={rect.height}
+                rx={10}
+                fill={fill}
+              />
             )
-          })
-        )}
+          })}
+          {claimedLines.map(({ placement, stroke }) => {
+            const points = cellsForPlacement(placement)
+              .map(({ row, col }) => {
+                const rect = cellRects[`${row}-${col}`]
+                return rect ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null
+              })
+              .filter(Boolean)
+            if (points.length < 2) return null
+            return (
+              <polyline
+                key={placement.word}
+                points={points.map((p) => `${p.x},${p.y}`).join(' ')}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.9}
+              />
+            )
+          })}
+        </svg>
+
+        <div
+          className="relative z-10 grid gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${round.cols}, minmax(0, 1fr))` }}
+        >
+          {round.grid.map((rowLetters, r) =>
+            rowLetters.map((letter, c) => {
+              const cellKey = `${r}-${c}`
+              const isClaimed = Boolean(cellColor[cellKey])
+              const isSelected = selectedSet.has(cellKey)
+              const isHint = !isSelected && hintCellKey === cellKey
+              return (
+                <button
+                  key={cellKey}
+                  ref={setCellRef(cellKey)}
+                  type="button"
+                  onClick={() => handleCellPress(r, c)}
+                  disabled={allFound || submitting}
+                  className={`flex aspect-square w-11 select-none items-center justify-center rounded-lg font-mono text-lg font-bold transition active:scale-90 disabled:cursor-not-allowed sm:w-14 sm:text-2xl ${
+                    isClaimed
+                      ? 'bg-transparent text-gray-900'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
+                  } ${isSelected ? 'ring-4 ring-indigo-500' : ''} ${
+                    isHint ? 'animate-pulse ring-4 ring-amber-400' : ''
+                  }`}
+                >
+                  {letter}
+                </button>
+              )
+            })
+          )}
+        </div>
       </div>
 
       <div className="flex min-h-[2.5rem] w-full max-w-xs items-center justify-center gap-3 rounded-lg border border-gray-200 px-4 py-2 dark:border-gray-800">

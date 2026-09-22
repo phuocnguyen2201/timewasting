@@ -7,8 +7,10 @@ export const BREAK_SECONDS = 5
 export const HINT_DELAY_SECONDS = 45
 
 // How long a player can pause between cell presses before their current
-// selection auto-submits as a guess.
-export const SUBMIT_DEBOUNCE_MS = 500
+// selection auto-submits as a guess. Resets on every press (see
+// handleCellPress in WordSearch.jsx), so this is the gap between taps, not
+// a fixed window from the first one.
+export const SUBMIT_DEBOUNCE_MS = 1000
 
 // Direction vectors are [dRow, dCol] — all 8 compass directions (forward
 // and reversed, straight and diagonal) at every difficulty, so a word is
