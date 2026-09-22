@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { preloadDictionary } from '../../lib/dictionary'
 import { supabase } from '../../lib/supabase'
-import { BREAK_SECONDS, DIFFICULTIES, TOTAL_ROUNDS } from './config'
+import {
+  BREAK_SECONDS,
+  DIFFICULTIES,
+  HINT_DELAY_SECONDS,
+  SUBMIT_DEBOUNCE_MS,
+  TOTAL_ROUNDS,
+} from './config'
 import { cellsForPlacement, generatePuzzle } from './grid'
 import { pickRandomTheme } from './themes'
 
@@ -138,7 +144,8 @@ export default function WordSearch({ room, myPlayerId, isHost, players }) {
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6">
       <p className="max-w-xs text-center text-gray-500 dark:text-gray-400">
         Pick a difficulty. {TOTAL_ROUNDS} rounds, a new themed grid each
-        round — find and type every hidden word before someone else does.
+        round — press the letters of a hidden word in order to claim it
+        before someone else does.
       </p>
       <div className="flex w-full max-w-xs flex-col gap-3">
         {Object.entries(DIFFICULTIES).map(([key, d]) => (
@@ -150,7 +157,7 @@ export default function WordSearch({ room, myPlayerId, isHost, players }) {
           >
             {d.label}{' '}
             <span className="font-normal text-gray-400">
-              — {d.size}x{d.size}, {d.wordCount} words
+              — {d.rows}x{d.cols}, {d.wordCount} words
             </span>
           </button>
         ))}
@@ -161,16 +168,26 @@ export default function WordSearch({ room, myPlayerId, isHost, players }) {
 }
 
 function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
-  const [guess, setGuess] = useState('')
+  const [selectedCells, setSelectedCells] = useState([]) // [{ row, col }] in press order
   const [claims, setClaims] = useState([]) // [{ id, player_id, word }]
   const [submitting, setSubmitting] = useState(false)
   const [advancing, setAdvancing] = useState(false)
   const [breakCountdown, setBreakCountdown] = useState(BREAK_SECONDS)
   const [error, setError] = useState(null)
+  const [now, setNow] = useState(() => Date.now())
+  const claimsRef = useRef(claims)
+  claimsRef.current = claims
 
   function playerName(playerId) {
     return players.find((p) => p.id === playerId)?.name ?? '...'
   }
+
+  // Drives the hint timer below — ticking every second is plenty for a
+  // 45s threshold.
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Load + subscribe to words claimed so far this round.
   useEffect(() => {
@@ -179,7 +196,7 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
     async function loadClaims() {
       const { data } = await supabase
         .from('word_search_answers')
-        .select('id, player_id, word')
+        .select('id, player_id, word, answered_at')
         .eq('round_id', round.id)
         .order('answered_at', { ascending: true })
       if (!ignore && data) setClaims(data)
@@ -253,17 +270,22 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allFound, isLastRound])
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    const normalized = guess.trim().toUpperCase()
-    if (!normalized || allFound || submitting) return
+  const pendingWord = selectedCells.map(({ row, col }) => round.grid[row][col]).join('')
+
+  // Verified exactly like the old typing flow: check the built-up word
+  // against the round's word list and the claims already in, then let the
+  // atomic submit_word_search_guess RPC (unique on round + word) be the
+  // authority — that's what actually makes "other players can't claim it
+  // once someone has" hold under a race, same as every other game here.
+  async function submitGuess(normalized) {
+    if (!normalized) return
     setError(null)
 
     if (!round.words.includes(normalized)) {
-      setError(`"${normalized}" isn't one of the hidden words.`)
+      setError(`"${normalized}" isn't a hidden word.`)
       return
     }
-    if (claims.some((c) => c.word === normalized)) {
+    if (claimsRef.current.some((c) => c.word === normalized)) {
       setError(`Someone already found "${normalized}".`)
       return
     }
@@ -277,12 +299,10 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
       })
       if (error) throw error
       const { status } = data[0]
-      if (status === 'correct') {
-        setGuess('')
-      } else if (status === 'already_claimed') {
+      if (status === 'already_claimed') {
         setError(`Someone already found "${normalized}".`)
       } else if (status === 'not_in_list') {
-        setError(`"${normalized}" isn't one of the hidden words.`)
+        setError(`"${normalized}" isn't a hidden word.`)
       }
     } catch (err) {
       setError(err.message)
@@ -290,6 +310,30 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
       setSubmitting(false)
     }
   }
+
+  function handleCellPress(row, col) {
+    if (allFound || submitting) return
+    setError(null)
+    setSelectedCells((prev) => [...prev, { row, col }])
+  }
+
+  function handleClearSelection() {
+    setSelectedCells([])
+    setError(null)
+  }
+
+  // A pause of SUBMIT_DEBOUNCE_MS after the last press auto-submits
+  // whatever's been built up so far, then clears the selection either way
+  // so the next word starts fresh.
+  useEffect(() => {
+    if (selectedCells.length === 0) return
+    const timeout = setTimeout(() => {
+      submitGuess(pendingWord)
+      setSelectedCells([])
+    }, SUBMIT_DEBOUNCE_MS)
+    return () => clearTimeout(timeout)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCells])
 
   // Cell -> player color for every claimed word's letters.
   const cellColor = {}
@@ -302,6 +346,29 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
     }
   }
 
+  const selectedSet = new Set(selectedCells.map(({ row, col }) => `${row}-${col}`))
+
+  // Support: once nobody's found a new word in a while, give everyone a
+  // nudge by highlighting the first letter of one undiscovered word. The
+  // clock resets on every find, so the threshold is "45s stuck on the same
+  // word," not "45s into the round." Derived straight from shared
+  // round/claims data (no extra state to sync), so it always lands on the
+  // same word for every player, and automatically moves to another
+  // undiscovered word — with its own fresh 45s — once that one's claimed.
+  const lastFindAt =
+    claims.length > 0
+      ? Math.max(...claims.map((c) => new Date(c.answered_at).getTime()))
+      : new Date(round.started_at).getTime()
+  const secondsSinceLastFind = (now - lastFindAt) / 1000
+  const hintWord =
+    !allFound && secondsSinceLastFind >= HINT_DELAY_SECONDS
+      ? round.words.find((w) => !claims.some((c) => c.word === w))
+      : null
+  const hintPlacement = hintWord
+    ? round.placements.find((p) => p.word === hintWord)
+    : null
+  const hintCellKey = hintPlacement ? `${hintPlacement.row}-${hintPlacement.col}` : null
+
   return (
     <div className="flex flex-1 flex-col items-center gap-5 p-6">
       <div className="text-center">
@@ -313,24 +380,58 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
           {claims.length}/{round.words.length} found · You found{' '}
           {myClaims.length}
         </p>
+        {hintCellKey && (
+          <p className="mt-1 text-xs font-semibold text-amber-500 dark:text-amber-400">
+            Hint: a starting letter is highlighted below
+          </p>
+        )}
       </div>
 
       <div
-        className="grid gap-1"
-        style={{ gridTemplateColumns: `repeat(${round.size}, minmax(0, 1fr))` }}
+        className="grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${round.cols}, minmax(0, 1fr))` }}
       >
         {round.grid.map((rowLetters, r) =>
-          rowLetters.map((letter, c) => (
-            <div
-              key={`${r}-${c}`}
-              className={`flex aspect-square w-7 items-center justify-center rounded font-mono text-sm font-bold sm:w-9 sm:text-base ${
-                cellColor[`${r}-${c}`] ??
-                'bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300'
-              }`}
-            >
-              {letter}
-            </div>
-          ))
+          rowLetters.map((letter, c) => {
+            const cellKey = `${r}-${c}`
+            const isSelected = selectedSet.has(cellKey)
+            const isHint = !isSelected && hintCellKey === cellKey
+            return (
+              <button
+                key={cellKey}
+                type="button"
+                onClick={() => handleCellPress(r, c)}
+                disabled={allFound || submitting}
+                className={`flex aspect-square w-11 select-none items-center justify-center rounded-lg font-mono text-lg font-bold transition active:scale-90 disabled:cursor-not-allowed sm:w-14 sm:text-2xl ${
+                  cellColor[cellKey] ??
+                  'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
+                } ${isSelected ? 'ring-4 ring-indigo-500' : ''} ${
+                  isHint ? 'animate-pulse ring-4 ring-amber-400' : ''
+                }`}
+              >
+                {letter}
+              </button>
+            )
+          })
+        )}
+      </div>
+
+      <div className="flex min-h-[2.5rem] w-full max-w-xs items-center justify-center gap-3 rounded-lg border border-gray-200 px-4 py-2 dark:border-gray-800">
+        <p className="flex-1 text-center font-mono text-xl font-bold tracking-[0.2em] text-gray-900 dark:text-gray-100">
+          {pendingWord || (
+            <span className="text-sm font-normal tracking-normal text-gray-400">
+              Press letters to spell a word...
+            </span>
+          )}
+        </p>
+        {selectedCells.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearSelection}
+            className="text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          >
+            Clear
+          </button>
         )}
       </div>
 
@@ -348,26 +449,6 @@ function RoundView({ round, room, myPlayerId, isHost, players, onSessionEnd }) {
             </span>
           ))}
         </div>
-      )}
-
-      {!allFound && (
-        <form onSubmit={handleSubmit} className="w-full max-w-xs space-y-3">
-          <input
-            type="text"
-            value={guess}
-            onChange={(e) => setGuess(e.target.value)}
-            placeholder="Type a word you found"
-            autoFocus
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-lg uppercase focus:border-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          />
-          <button
-            type="submit"
-            disabled={submitting || !guess.trim()}
-            className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? 'Submitting...' : 'Submit'}
-          </button>
-        </form>
       )}
 
       {error && <p className="text-sm text-red-500">{error}</p>}

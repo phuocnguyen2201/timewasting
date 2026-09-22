@@ -28,20 +28,21 @@ export function cellsForPlacement({ row, col, dr, dc, word }) {
   }))
 }
 
-// Every straight run of letters (either direction, length 3..size) that
-// exists anywhere in the grid, as {word, row, col, dr, dc} placements. Used
-// to find "bonus" words that landed in the grid purely from the random
-// fill letters — see generatePuzzle() below for why that matters.
-function scanGridRuns(grid, size) {
+// Every straight run of letters (either direction, length 3..max(rows,cols))
+// that exists anywhere in the grid, as {word, row, col, dr, dc} placements.
+// Used to find "bonus" words that landed in the grid purely from the
+// random fill letters — see generatePuzzle() below for why that matters.
+function scanGridRuns(grid, rows, cols) {
+  const maxLen = Math.max(rows, cols)
   const runs = []
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
       for (const [dr, dc] of ALL_DIRECTIONS) {
         let word = ''
-        for (let len = 1; len <= size; len++) {
+        for (let len = 1; len <= maxLen; len++) {
           const r = row + dr * (len - 1)
           const c = col + dc * (len - 1)
-          if (r < 0 || r >= size || c < 0 || c >= size) break
+          if (r < 0 || r >= rows || c < 0 || c >= cols) break
           word += grid[r][c]
           if (word.length >= 3) {
             runs.push({ word, row, col, dr, dc })
@@ -53,7 +54,7 @@ function scanGridRuns(grid, size) {
   return runs
 }
 
-// Builds a size x size letter grid with a subset of the theme's words
+// Builds a rows x cols letter grid with a subset of the theme's words
 // hidden in it, per the given difficulty's directions/word count. Words may
 // cross paths if they agree on the shared letter (the standard word-search
 // technique) but never overwrite a conflicting one — a placement attempt
@@ -69,12 +70,13 @@ function scanGridRuns(grid, size) {
 // other real dictionary word actually traceable in it and folds a capped,
 // random sample of them into the round as legitimate bonus finds.
 export async function generatePuzzle(difficulty, theme) {
-  const { size, wordCount, directions } = DIFFICULTIES[difficulty]
+  const { rows, cols, wordCount, directions } = DIFFICULTIES[difficulty]
+  const maxLen = Math.max(rows, cols)
   const candidates = shuffle(
-    (THEMES[theme] ?? []).filter((w) => w.length >= 3 && w.length <= size)
+    (THEMES[theme] ?? []).filter((w) => w.length >= 3 && w.length <= maxLen)
   )
 
-  const grid = Array.from({ length: size }, () => Array(size).fill(null))
+  const grid = Array.from({ length: rows }, () => Array(cols).fill(null))
   const placements = []
 
   for (const word of candidates) {
@@ -86,9 +88,9 @@ export async function generatePuzzle(difficulty, theme) {
       // Valid start bounds for this direction, so the whole word lands
       // inside the grid.
       const rowStart = dr >= 0 ? 0 : word.length - 1
-      const rowEnd = dr <= 0 ? size - 1 : size - word.length
+      const rowEnd = dr <= 0 ? rows - 1 : rows - word.length
       const colStart = dc >= 0 ? 0 : word.length - 1
-      const colEnd = dc <= 0 ? size - 1 : size - word.length
+      const colEnd = dc <= 0 ? cols - 1 : cols - word.length
       if (rowStart > rowEnd || colStart > colEnd) continue
 
       const row = rowStart + Math.floor(Math.random() * (rowEnd - rowStart + 1))
@@ -109,8 +111,8 @@ export async function generatePuzzle(difficulty, theme) {
     }
   }
 
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
       if (grid[r][c] === null) grid[r][c] = randomLetter()
     }
   }
@@ -120,7 +122,7 @@ export async function generatePuzzle(difficulty, theme) {
   const bonusCap = Math.ceil(wordCount / 2)
   const bonusPlacements = []
 
-  for (const run of shuffle(scanGridRuns(grid, size))) {
+  for (const run of shuffle(scanGridRuns(grid, rows, cols))) {
     if (bonusPlacements.length >= bonusCap) break
     if (seen.has(run.word) || !dictionary.has(run.word)) continue
     seen.add(run.word)
@@ -130,7 +132,8 @@ export async function generatePuzzle(difficulty, theme) {
   const allPlacements = [...placements, ...bonusPlacements]
 
   return {
-    size,
+    rows,
+    cols,
     grid,
     words: allPlacements.map((p) => p.word),
     placements: allPlacements,
