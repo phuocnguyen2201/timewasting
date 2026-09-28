@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useParams } from 'react-router-dom'
 import Leaderboard from '../components/Leaderboard'
 import { usePlayer } from '../context/PlayerContext'
 import GuessTheWord from '../games/guessTheWord/GuessTheWord'
+import MathBlitz from '../games/mathBlitz/MathBlitz'
 import WhatIsTheObject from '../games/whatIsTheObject/WhatIsTheObject'
 import WordSearch from '../games/wordSearch/WordSearch'
 import { supabase } from '../lib/supabase'
@@ -11,6 +12,7 @@ const GAMES = {
   'guess-the-word': GuessTheWord,
   'what-is-the-object': WhatIsTheObject,
   'word-search': WordSearch,
+  'math-blitz': MathBlitz,
 }
 
 export default function GameRoom() {
