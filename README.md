@@ -93,6 +93,7 @@ src/
   pages/            Landing, GameList, GameDetail, GameRoom
   games/
     guessTheWord/   the "Guess the Word" game (see below)
+    mathBlitz/      the "Math Blitz" game (see below)
 supabase/
   schema.sql        tables, indexes, Realtime + RLS policies,
                      submit_word_guess(), leave_room()
@@ -159,3 +160,34 @@ Most words claimed wins.
   skip `isValidWord()` and submit pattern-matching gibberish straight to
   the RPC and still score. Consistent with this app's existing no-auth,
   casual-party trust model (see `rooms`' publicly-readable RLS).
+
+### Math Blitz (`math-blitz`)
+
+Each round shows a randomly generated arithmetic problem (`operand_a
+<op> operand_b`, `<op>` one of `+`/`-`/`×`). Players race to type the
+correct answer first; the winner scores a point and, after a short
+reveal, the next round starts. If nobody solves it before the
+difficulty's timeout, the round ends unsolved (no point) and the answer
+is revealed anyway before moving on.
+
+- **Difficulty** ([config.js](./src/games/mathBlitz/config.js)): Easy
+  (+/- only, 12s), Medium (+/-/×, 15s), Hard (bigger +/- operands, 18s) —
+  chosen once per session by the host, same as Guess the Word's time
+  limit. Multiplication draws from its own smaller operand range
+  (`multiplyMax`) so problems stay mental-math-sized even at Hard, where
+  +/- operands run much bigger.
+- **Fully server-verified, unlike the other games here**: `math_rounds`
+  only stores the operands and operator, never the answer.
+  `submit_math_guess()` recomputes the correct answer itself from those
+  stored values and checks the guess against that — there's no
+  client-trusted "is this actually correct" step to skip, unlike the
+  dictionary check above or `isObjectWord()` in What Is The Object.
+- **One winner per round**: `submit_math_guess()` locks the round row
+  (`for update`) and only updates `winner_player_id` while it's still
+  null, so two simultaneous correct guesses can't both win — the loser's
+  update just affects zero rows and comes back as `already_answered`.
+- **Schema**: see
+  [documentation/math-blitz-schema.sql](./documentation/math-blitz-schema.sql)
+  — not part of `supabase/schema.sql` since that file isn't tracked in
+  this repo (see Supabase setup above); run it manually in the SQL
+  editor after your existing schema.
