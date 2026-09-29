@@ -1,193 +1,46 @@
 # Game Night
 
-Browser-based, mobile-first multiplayer game app. See [PROJECT_SPEC.md](./PROJECT_SPEC.md)
-for the full product spec.
+A browser-based, mobile-friendly multiplayer game app. Create a room, share
+the code, and play quick party games with friends in real time.
 
-## Stack
+## How to play
 
-- Vite + React + Tailwind CSS
-- Supabase (Postgres + Realtime) for rooms, players, and live leaderboards
-- GitHub Pages for hosting (deployed via GitHub Actions)
+1. **Open the app** and enter your name.
+2. **Pick a game** from the list.
+3. **Create a room**, or **join** a friend's room with their 4-letter room code.
+4. **The host starts the game.** Everyone in the room plays at the same time,
+   and points show up on the live leaderboard.
+5. When the last round ends, the room reopens so you can play again.
 
-## Getting started
+### Games
+
+- **Guess the Word** — Each round gives you a first and last letter (like
+  `H ⋯ E`). Type as many real words as you can that fit. Each word can only
+  be claimed once, so be quick. Most words wins.
+- **Math Blitz** — A math problem appears. Be the first to type the right
+  answer to score. The host picks the difficulty.
+- **What Is The Object** — A letter appears. Be the first to name an object
+  that starts with it.
+- **Word Search** — Find the hidden words in the grid by tapping their
+  letters in order. First to claim a word gets the point. The host picks the
+  difficulty.
+
+## Run it yourself
 
 ```bash
 npm install
-cp .env.example .env   # fill in your Supabase project URL + anon key
+cp .env.example .env   # add your Supabase project URL + anon key
 npm run dev
 ```
 
-## Supabase setup
-
-1. Create a project at [supabase.com](https://supabase.com).
-2. Run [supabase/schema.sql](./supabase/schema.sql) in the SQL editor to create
-   the `games`, `rooms`, `players`, `rounds`, and `answers` tables (with
-   Realtime + RLS enabled) plus the `submit_word_guess()` scoring function
-   and the `leave_room()` cleanup function. Re-running it drops and
-   recreates `rounds`/`answers` (in-progress gameplay data, not worth
-   migrating column-by-column) — `games`/`rooms`/`players` are altered in
-   place instead.
-3. Run [supabase/seed.sql](./supabase/seed.sql) to register the "Guess the
-   Word" game so it shows up on the Game List screen.
-4. Copy your Project URL and anon key into `.env` as `VITE_SUPABASE_URL` and
-   `VITE_SUPABASE_ANON_KEY`.
-
-## Room lifecycle
-
-`rooms.status` gates whether a room code is joinable
-(`GameDetail.jsx`'s join flow only matches `status = 'waiting'`):
-
-- **`waiting`** — open to new joiners. Set on create, and again once a game
-  session ends (last word revealed).
-- **`started`** — a session is in progress; new joins are rejected.
-- **`expired`** — the last player left. Set atomically by the `leave_room()`
-  function so two people leaving at once can't both think someone's still
-  there and skip it.
+You'll need a free [Supabase](https://supabase.com) project. Put its URL and
+anon key in `.env` as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then
+run the SQL files in the SQL editor to create the tables.
 
 ## Deploying
 
-### GitHub Pages (current)
+Pushes to `main` deploy automatically to GitHub Pages. Add
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repo secrets and set
+Pages → Source to **GitHub Actions**. Netlify also works via `netlify.toml`.
 
-[.github/workflows/deploy.yml](./.github/workflows/deploy.yml) builds and
-deploys on every push to `main`. One-time setup:
-
-1. **Repo secrets** — Settings → Secrets and variables → Actions → New
-   repository secret, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-   (same values as your local `.env`).
-2. **Enable Pages** — Settings → Pages → Build and deployment → Source:
-   **GitHub Actions**.
-3. Push to `main` (or run the workflow manually from the Actions tab). The
-   site ends up at `https://<user>.github.io/<repo>/`.
-
-Two things this workflow handles that a plain `npm run build` wouldn't:
-
-- **Base path** — a GitHub Pages *project* site (not `<user>.github.io`
-  itself) is served under `/<repo>/`, not `/`, so the build passes
-  `--base=/<repo>/` (`github.event.repository.name`, resolved at build
-  time) to get every asset URL right. Don't run a plain `npm run build`
-  and upload `dist/` by hand — it'll 404 on all the assets.
-- **Client-side routing fallback** — GitHub Pages is static hosting with
-  no server-side rewrites, unlike Netlify's `netlify.toml` redirect rule.
-  A direct link or refresh on a route like `/room/ABCD` would 404. The
-  workflow copies `dist/index.html` to `dist/404.html` so GitHub Pages
-  serves the app on any unmatched path, letting React Router take it from
-  there.
-
-### Netlify (alternative)
-
-`netlify.toml` is still in the repo and works if you'd rather use Netlify
-— connect the repo at [app.netlify.com](https://app.netlify.com), it
-auto-detects the build command (`npm run build`) and publish directory
-(`dist`) plus the SPA redirect rule already in that file. Add
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as environment variables
-in the Netlify site settings. No base-path flag needed here since Netlify
-serves the site at the root of its own domain.
-
-## Project structure
-
-```
-src/
-  components/       Leaderboard, GameCard
-  context/          PlayerProvider (per-session player name)
-  lib/              supabase client, room code generator
-  pages/            Landing, GameList, GameDetail, GameRoom
-  games/
-    guessTheWord/   the "Guess the Word" game (see below)
-    mathBlitz/      the "Math Blitz" game (see below)
-supabase/
-  schema.sql        tables, indexes, Realtime + RLS policies,
-                     submit_word_guess(), leave_room()
-  seed.sql          registers games in the catalog
-```
-
-## Games
-
-Each game lives under `src/games/<slug>/` and is registered by `slug` in the
-`GAMES` map in [src/pages/GameRoom.jsx](./src/pages/GameRoom.jsx), matched
-against the room's `games.slug` column.
-
-### Guess the Word (`guess-the-word`)
-
-Each round has a *pattern* — a random first and last letter (e.g. `H ⋯ E`,
-any length) — not a single target word. Players race to type as many real
-words fitting that pattern as they can before time runs out (HOUSE, HIKE,
-and HORRIBLE are all valid for `H ⋯ E`); each word can only be claimed
-once, so once someone's typed it, it's off the table for everyone else.
-Most words claimed wins.
-
-- **Why no stored target word (or length)**: the round used to store one
-  specific word and reject anything else, but many real words share a
-  shape — both HOUSE and HORSE fit `H___E` — so comparing against a single
-  answer wrongly rejected valid guesses. Pinning the length has the same
-  problem at a bigger scale: hundreds of words start with "H" and end with
-  "E" at every length. Now `rounds` only stores `start_char`/`end_char`;
-  see `matchesPattern()` in [words.js](./src/games/guessTheWord/words.js),
-  run client-side before a guess is even sent to the server.
-- **`isValidWord()`**: an actual dictionary lookup, via
-  [an-array-of-english-words](https://www.npmjs.com/package/an-array-of-english-words)
-  (~275k real English words). It's ~3MB of JSON, so it's loaded through a
-  dynamic `import()` — Vite code-splits it into its own chunk instead of
-  bloating the main bundle, and `preloadDictionary()` kicks the fetch off
-  as soon as the game screen mounts so it's ready before anyone submits a
-  guess. Earlier versions of this check only confirmed the guess matched
-  the round's first/last letter (or, briefly, that it was letter-shaped at
-  all) — either way "BSDFKDSFKT" scored against a B...T pattern, since
-  nothing ever checked it was a real word.
-- **Host**: whoever created the room (`rooms.host_id`, claimed on first
-  join — see `isCreatorRef` in [GameRoom.jsx](./src/pages/GameRoom.jsx)).
-  Only the host sees the time-limit/word-count pickers; this is a
-  client-side gate only, same trust model as the rest of this no-auth v1.
-- **Time limits** ([config.js](./src/games/guessTheWord/config.js)): 15s,
-  30s, or 45s per word, chosen once for the whole session.
-- **Sessions**: a host-chosen time limit + word count (1-5) shares one
-  `session_id`; each word is a `rounds` row with a `word_index`/
-  `total_words`. A unique `(session_id, word_index)` constraint means if
-  two clients race to advance to the next word, only one insert wins — the
-  loser's error is swallowed and its realtime subscription picks up the
-  winner's round.
-- **Claiming a word**: `submit_word_guess()` re-checks the pattern and the
-  round clock server-side, then tries to insert into `answers`, which has
-  a unique `(round_id, guess)` constraint — that's what actually makes
-  "only one player can claim a word" hold up even if two people submit the
-  same word at the same instant; the second insert just fails. Each claim
-  is worth a flat 1 point, added to `players.score` in the same
-  transaction. The claimed-words list at the bottom of the screen is every
-  row in `answers` for the round, live via Realtime.
-- **Known limitation**: the dictionary check only runs client-side —
-  `submit_word_guess()` still only re-verifies the pattern and the clock,
-  not realness (mirroring a 275k-word list into Postgres and checking it
-  per guess is disproportionate for this app). A modified client could
-  skip `isValidWord()` and submit pattern-matching gibberish straight to
-  the RPC and still score. Consistent with this app's existing no-auth,
-  casual-party trust model (see `rooms`' publicly-readable RLS).
-
-### Math Blitz (`math-blitz`)
-
-Each round shows a randomly generated arithmetic problem (`operand_a
-<op> operand_b`, `<op>` one of `+`/`-`/`×`). Players race to type the
-correct answer first; the winner scores a point and, after a short
-reveal, the next round starts. If nobody solves it before the
-difficulty's timeout, the round ends unsolved (no point) and the answer
-is revealed anyway before moving on.
-
-- **Difficulty** ([config.js](./src/games/mathBlitz/config.js)): Easy
-  (+/- only, 12s), Medium (+/-/×, 15s), Hard (bigger +/- operands, 18s) —
-  chosen once per session by the host, same as Guess the Word's time
-  limit. Multiplication draws from its own smaller operand range
-  (`multiplyMax`) so problems stay mental-math-sized even at Hard, where
-  +/- operands run much bigger.
-- **Fully server-verified, unlike the other games here**: `math_rounds`
-  only stores the operands and operator, never the answer.
-  `submit_math_guess()` recomputes the correct answer itself from those
-  stored values and checks the guess against that — there's no
-  client-trusted "is this actually correct" step to skip, unlike the
-  dictionary check above or `isObjectWord()` in What Is The Object.
-- **One winner per round**: `submit_math_guess()` locks the round row
-  (`for update`) and only updates `winner_player_id` while it's still
-  null, so two simultaneous correct guesses can't both win — the loser's
-  update just affects zero rows and comes back as `already_answered`.
-- **Schema**: see
-  [documentation/math-blitz-schema.sql](./documentation/math-blitz-schema.sql)
-  — not part of `supabase/schema.sql` since that file isn't tracked in
-  this repo (see Supabase setup above); run it manually in the SQL
-  editor after your existing schema.
+See [PROJECT_SPEC.md](./PROJECT_SPEC.md) for the full product spec.
