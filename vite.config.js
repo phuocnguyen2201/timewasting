@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
-export default defineConfig({
+// --mode pages instead of --base=/timewasting/: Git Bash rewrites args starting with / into Windows paths
+export default defineConfig(({ mode }) => ({
+  base: mode === 'pages' ? '/timewasting/' : '/',
   plugins: [react(), tailwindcss()],
   build: {
     // The an-array-of-english-words dictionary (~3.3MB of JSON, ~275k
@@ -25,4 +27,4 @@ export default defineConfig({
           }
       }
   }
-})
+}))

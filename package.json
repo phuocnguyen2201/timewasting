@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "build:pages": "vite build --base=/timewasting/",
+    "build:pages": "vite build --mode pages",
     "predeploy": "npm run build:pages",
     "deploy": "gh-pages -d dist"
   },
