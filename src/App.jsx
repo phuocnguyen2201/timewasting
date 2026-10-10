@@ -8,10 +8,10 @@ import Landing from './pages/Landing'
 export default function App() {
   return (
     <PlayerProvider>
-      <BrowserRouter>
+      {/* Vite BASE_URL is "/timewasting/" on Pages; strip the slash so the bare URL matches too */}
+      <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '') || '/'}>
         <Routes>
           <Route path="/" element={<Landing />} />
-          <Route path="/timewasting" element={<Landing />} />
           <Route path="/games" element={<GameList />} />
           <Route path="/games/:gameId" element={<GameDetail />} />
           <Route path="/room/:code" element={<GameRoom />} />
