@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router-dom'
 import Leaderboard from '../components/Leaderboard'
 import { usePlayer } from '../context/PlayerContext'
+import GuessTheNumber from '../games/guessTheNumber/GuessTheNumber'
 import GuessTheWord from '../games/guessTheWord/GuessTheWord'
 import MathBlitz from '../games/mathBlitz/MathBlitz'
 import WhatIsTheObject from '../games/whatIsTheObject/WhatIsTheObject'
@@ -13,6 +14,7 @@ const GAMES = {
   'what-is-the-object': WhatIsTheObject,
   'word-search': WordSearch,
   'math-blitz': MathBlitz,
+  'guess-the-number': GuessTheNumber,
 }
 
 export default function GameRoom() {

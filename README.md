@@ -21,6 +21,10 @@ the code, and play quick party games with friends in real time.
   answer to score. The host picks the difficulty.
 - **What Is The Object** — A letter appears. Be the first to name an object
   that starts with it.
+- **Guess the Number** — Two players. Each picks a secret 4-digit number
+  within 45 seconds. Then take turns guessing the other's number, digit by
+  digit in order. Exact digits are revealed on the boards. First to guess
+  the whole number wins.
 - **Word Search** — Find the hidden words in the grid by tapping their
   letters in order. First to claim a word gets the point. The host picks the
   difficulty.
